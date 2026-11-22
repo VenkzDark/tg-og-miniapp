@@ -230,5 +230,5 @@ await app.start()
 await app.updater.start_polling()
 print(f"Bot TG OG activo en puerto {port}...")
 await asyncio.Event().wait()
-if name == 'main':
+if __name__ == '__main__':
 asyncio.run(iniciar_todo())
