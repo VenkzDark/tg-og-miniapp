@@ -1,312 +1,277 @@
 import os
-import io
+import json
 import random
 import string
 import asyncio
 import aiohttp
 from aiohttp import web
-from telegram import Update
+from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
-CANAL_ID = os.environ.get("CANAL_ID", "")
+# Pon aquí la URL pública que te dé Render (ej. https://onrender.com)
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
 
-admins = {OWNER_ID}
-usuarios_autorizados = {OWNER_ID}
-solicitudes_pendientes = {}
+# ==============================================================================
+# SECCIÓN PERSONALIZABLE: AQUÍ PUEDES AGREGAR TUS PROPIAS PALABRAS Y PREFIJOS OG
+# ==============================================================================
+PALABRAS_OG_CUSTOM = [
+    "bond", "king", "dark", "cold", "fire", "soul", "void", "zero", "wolf", "lion",
+    "star", "moon", "rain", "wind", "snow", "gold", "jade", "ruby", "onyx", "neon",
+    "nova", "apex", "zeno", "echo", "flux", "haze", "mist", "dusk", "dawn", "fury",
+    "ghost", "frost", "storm", "blade", "drift", "viper", "venom", "chaos", "night",
+    # Agrega tus palabras abajo entre comillas y separadas por coma:
+    "vibe", "flow", "rare", "pure", "myth", "rune", "grim", "doom"
+]
 
-busquedas_activas = {}
-estadisticas = {}
-encontrados_lista = []
-ultimo_detalle = "Sin iniciar"
+PREFIJOS_CUSTOM = ["x", "z", "v", "k", "q", "im", "el", "mr", "dr"]
+# ==============================================================================
 
-def generar_4c_tiktok():
-    """Genera 4 caracteres válidos en TikTok (letras, números, '_' y '.')."""
-    caracteres = string.ascii_lowercase + string.digits + "_."
-    while True:
-        user = ''.join(random.choices(caracteres, k=4))
-        # TikTok prohíbe terminar en punto, dos puntos seguidos o ser solo números
-        if not user.endswith('.') and '..' not in user and not user.isdigit():
-            return user
+# --- INTERFAZ VISUAL DE LA MINI APP (HTML + CSS + JS) ---
+HTML_MINI_APP = """<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>TG OG Hunter</title>
+<script src="https://telegram.org"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #181b22;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --text: #f3f4f6;
+    --muted: #9ca3af;
+    --green: #10b981;
+    --red: #ef4444;
+    --yellow: #f59e0b;
+  }
+  * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  body { background: var(--bg); color: var(--text); margin: 0; padding: 16px; padding-bottom: 40px; }
+  .header { text-align: center; margin-bottom: 18px; }
+  .header h1 { font-size: 20px; margin: 0 0 4px 0; letter-spacing: 0.5px; }
+  .header p { font-size: 12px; color: var(--muted); margin: 0; }
+  
+  .tabs { display: flex; gap: 6px; margin-bottom: 16px; background: var(--card); padding: 5px; border-radius: 12px; }
+  .tab { flex: 1; padding: 10px 6px; border: none; background: transparent; color: var(--muted); font-weight: 600; font-size: 13px; border-radius: 8px; cursor: pointer; transition: 0.2s; }
+  .tab.active { background: var(--accent); color: white; }
 
-def generar_4l_tiktok():
-    """Genera 4 letras puras pronunciables (ej. 'kizu', 'bako')."""
-    vocales = "aeiou"
-    consonantes = "bcdfghjklmnprstvz"
-    return (
-        random.choice(consonantes) +
-        random.choice(vocales) +
-        random.choice(consonantes) +
-        random.choice(vocales)
-    )
+  .card { background: var(--card); border-radius: 14px; padding: 14px; margin-bottom: 14px; border: 1px solid #262a34; }
+  .row { display: flex; gap: 8px; margin-bottom: 10px; }
+  select, input { width: 100%; padding: 11px; border-radius: 10px; border: 1px solid #2e3340; background: #101217; color: white; font-size: 14px; outline: none; }
+  
+  .btn { width: 100%; padding: 12px; border: none; border-radius: 10px; font-weight: 700; font-size: 14px; cursor: pointer; background: var(--accent); color: white; transition: 0.2s; }
+  .btn:active { transform: scale(0.98); }
+  .btn-green { background: var(--green); }
+  .btn-outline { background: transparent; border: 1px solid #374151; color: var(--text); }
 
-async def verificar_tiktok(session, username):
-    """Analiza el código interno de TikTok para saber si el perfil existe."""
-    global ultimo_detalle
-    url = "https://tiktok.com" + "/@" + username
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9"
+  .user-item { display: flex; justify-content: space-between; align-items: center; padding: 11px 12px; background: #101217; border-radius: 10px; margin-bottom: 8px; border: 1px solid #232732; }
+  .user-name { font-family: monospace; font-size: 15px; font-weight: bold; color: #60a5fa; }
+  .badge { font-size: 11px; padding: 3px 8px; border-radius: 6px; font-weight: 600; }
+  .badge-free { background: rgba(16, 185, 129, 0.15); color: var(--green); }
+  .badge-taken { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+  .badge-wait { background: rgba(245, 158, 11, 0.15); color: var(--yellow); }
+
+  .actions { display: flex; gap: 6px; align-items: center; }
+  .mini-btn { padding: 6px 10px; border-radius: 7px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; background: #262a34; color: white; }
+  .section { display: none; }
+  .section.active { display: block; }
+</style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>⚜️ TG OG USERNAME STUDIO</h1>
+    <p>Generador & Verificador t.me en tiempo real</p>
+  </div>
+
+  <!-- PESTAÑAS DE NAVEGACIÓN (PUEDES AGREGAR MÁS AQUÍ) -->
+  <div class="tabs">
+    <button class="tab active" onclick="cambiarTab('gen', this)">🎲 Generador</button>
+    <button class="tab" onclick="cambiarTab('check', this)">🔍 Verificar @</button>
+    <button class="tab" onclick="cambiarTab('saved', this)">⭐ Guardados (<span id="count-saved">0</span>)</button>
+  </div>
+
+  <!-- SECCIÓN 1: GENERADOR + AUTO-CHECKER -->
+  <div id="sec-gen" class="section active">
+    <div class="card">
+      <div class="row">
+        <select id="categoria">
+          <option value="4l_og">4 Letras OG (ej. bond, kizu)</option>
+          <option value="5l_og">5 Letras OG (ej. ghost, viper)</option>
+          <option value="5c_mix">5 Caracteres Mix (ej. v1per, x_king)</option>
+          <option value="custom_pref">Con tu Prefijo OG (ej. xbond)</option>
+        </select>
+      </div>
+      <div class="row">
+        <button class="btn" onclick="generarYVerificar()">⚡ Generar y Verificar (8)</button>
+      </div>
+    </div>
+    <div id="lista-resultados"></div>
+  </div>
+
+  <!-- SECCIÓN 2: VERIFICADOR MANUAL DIRECTO -->
+  <div id="sec-check" class="section">
+    <div class="card">
+      <p style="font-size:13px; color:var(--muted); margin-top:0;">Escribe un usuario (mín. 5 letras en TG, o 4L si es Fragment):</p>
+      <div class="row">
+        <input type="text" id="input-manual" placeholder="Ej: ghost, v1per, king..." maxlength="32">
+      </div>
+      <button class="btn btn-green" onclick="verificarManual()">Comprobar en t.me</button>
+      <div id="res-manual" style="margin-top:14px;"></div>
+    </div>
+  </div>
+
+  <!-- SECCIÓN 3: FAVORITOS GUARDADOS -->
+  <div id="sec-saved" class="section">
+    <div class="card">
+      <div class="row">
+        <button class="btn btn-outline" onclick="copiarTodosGuardados()">📋 Copiar Todos</button>
+        <button class="btn btn-outline" style="color:var(--red);" onclick="limpiarGuardados()">🗑️ Borrar</button>
+      </div>
+    </div>
+    <div id="lista-guardados"></div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- AQUÍ PUEDES AGREGAR TUS PROPIAS SECCIONES EXTRAS (EJ. FRAGMENT / TIPS) -->
+  <!-- ===================================================================== -->
+
+<script>
+  const tg = window.Telegram.WebApp;
+  tg.expand(); // Expande la Mini App a pantalla completa
+
+  let guardados = JSON.parse(localStorage.getItem('og_saved') || '[]');
+  actualizarContador();
+
+  function cambiarTab(id, el) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('sec-' + id).classList.add('active');
+    if (id === 'saved') renderGuardados();
+  }
+
+  async function generarYVerificar() {
+    const cat = document.getElementById('categoria').value;
+    const cont = document.getElementById('lista-resultados');
+    cont.innerHTML = '<p style="text-align:center; color:#9ca3af;">⏳ Consultando t.me...</p>';
+
+    try {
+      const resp = await fetch(`/api/generar?cat=${cat}`);
+      const data = await resp.json();
+      cont.innerHTML = '';
+
+      data.resultados.forEach(item => {
+        const badgeClass = item.libre ? 'badge-free' : 'badge-taken';
+        const badgeText = item.libre ? 'SIN PERFIL (LIBRE/FRAG)' : 'OCUPADO';
+        cont.innerHTML += `
+          <div class="user-item">
+            <div>
+              <div class="user-name">@${item.user}</div>
+              <span class="badge ${badgeClass}">${badgeText}</span>
+            </div>
+            <div class="actions">
+              <button class="mini-btn" onclick="copiar('${item.user}')">📋</button>
+              <button class="mini-btn" onclick="guardar('${item.user}')">⭐</button>
+            </div>
+          </div>
+        `;
+      });
+    } catch (e) {
+      cont.innerHTML = '<p style="color:#ef4444; text-align:center;">Error conectando con el servidor.</p>';
     }
+  }
 
-    try:
-        async with session.get(url, headers=headers, timeout=10) as resp:
-            if resp.status == 429:
-                ultimo_detalle = "429 (Rate Limit - Pausa)"
-                return "RATE_LIMIT"
-            elif resp.status == 403:
-                ultimo_detalle = "403 (Bloqueo temporal)"
-                return "ERROR"
+  async function verificarManual() {
+    let raw = document.getElementById('input-manual').value.trim().toLowerCase().replace('@', '');
+    if (!raw) return;
+    const box = document.getElementById('res-manual');
+    box.innerHTML = '<p style="color:#9ca3af;">Verificando @' + raw + '...</p>';
 
-            texto = await resp.text()
+    const resp = await fetch(`/api/check?u=${encodeURIComponent(raw)}`);
+    const data = await resp.json();
+    const badgeClass = data.libre ? 'badge-free' : 'badge-taken';
+    const badgeText = data.libre ? '✅ SIN PERFIL PÚBLICO' : '❌ EN USO';
 
-            # 10202 es el código interno de TikTok cuando el usuario no existe
-            if '"statusCode":10202' in texto or "couldn't find this account" in texto.lower():
-                ultimo_detalle = f"Libre (@{username})"
-                return True
+    box.innerHTML = `
+      <div class="user-item">
+        <div>
+          <div class="user-name">@${data.user}</div>
+          <span class="badge ${badgeClass}">${badgeText}</span>
+        </div>
+        <div class="actions">
+          <button class="mini-btn" onclick="copiar('${data.user}')">Copiar</button>
+          <button class="mini-btn" onclick="guardar('${data.user}')">⭐</button>
+        </div>
+      </div>
+    `;
+  }
 
-            # 0 es el código cuando el usuario sí existe y tiene perfil activo
-            if '"statusCode":0' in texto or f'"uniqueId":"{username}"' in texto:
-                ultimo_detalle = f"Ocupado (@{username})"
-                return False
+  function copiar(texto) {
+    navigator.clipboard.writeText('@' + texto);
+    tg.HapticFeedback.impactOccurred('light');
+    tg.showAlert('Copiado: @' + texto);
+  }
 
-            # Si TikTok devolvió captcha o página vacía de bloqueo
-            ultimo_detalle = f"Captcha/Filtro (HTTP {resp.status})"
-            return "ERROR"
-    except Exception as e:
-        ultimo_detalle = f"Error red: {str(e)[:40]}"
-        return "ERROR"
+  function guardar(user) {
+    if (!guardados.includes(user)) {
+      guardados.push(user);
+      localStorage.setItem('og_saved', JSON.stringify(guardados));
+      actualizarContador();
+      tg.HapticFeedback.notificationOccurred('success');
+    }
+  }
 
-async def bucle_automatico(chat_id: int, app, modo: str):
-    estadisticas[chat_id] = {"revisados": 0, "ok": 0, "libres": 0, "error": 0, "rate_limit": 0}
+  function actualizarContador() {
+  
+APP ---
 
-    async with aiohttp.ClientSession() as session:
-        while busquedas_activas.get(chat_id, False):
-            # En TikTok conviene ir de 2 en 2 con pausa de 1.5s para evitar captchas
-            if modo == "4l":
-                lote = [generar_4l_tiktok() for _ in range(2)]
-            else:
-                lote = [generar_4c_tiktok() for _ in range(2)]
+async def ruta_webapp(request):
+return web.Response(text=HTML_MINI_APP, content_type="text/html")
+async def ruta_api_check(request):
+user = request.query.get("u", "").strip().lower()
+if not user:
+return web.json_response({"error": "vacio"}, status=400)
+async with aiohttp.ClientSession() as session:
+libre = await check_tme_disponible(session, user)
+return web.json_response({"user": user, "libre": libre})
+async def ruta_api_generar(request):
+cat = request.query.get("cat", "5l_og")
+candidatos = list({crear_candidato(cat) for _ in range(12)})[:8]
+resultados = []
+async with aiohttp.ClientSession() as session:
+tareas = [check_tme_disponible(session, u) for u in candidatos]
+estados = await asyncio.gather(*tareas)
+for u, libre in zip(candidatos, estados):
+resultados.append({"user": u, "libre": libre})
+return web.json_response({"resultados": resultados})
 
-            tareas = [verificar_tiktok(session, u) for u in lote]
-            resultados = await asyncio.gather(*tareas)
-
-            for user, estado in zip(lote, resultados):
-                estadisticas[chat_id]["revisados"] += 1
-
-                if estado is True:
-                    estadisticas[chat_id]["ok"] += 1
-                    estadisticas[chat_id]["libres"] += 1
-
-                    if user not in encontrados_lista:
-                        encontrados_lista.append(user)
-
-                    mensaje_hit = (
-                        f"🎵 **4C/4L POSIBLE EN TIKTOK**\n"
-                        f"━━━━━━━━━━━━━━━━━━━━\n"
-                        f"👤 **Usuario:** `@{user}`\n"
-                        f"🔗 **Perfil:** `://tiktok.com@{user}`\n"
-                        f"━━━━━━━━━━━━━━━━━━━━"
-                    )
-                    await app.bot.send_message(chat_id=chat_id, text=mensaje_hit, parse_mode="Markdown")
-
-                    if CANAL_ID:
-                        try:
-                            await app.bot.send_message(chat_id=CANAL_ID, text=mensaje_hit, parse_mode="Markdown")
-                        except Exception:
-                            pass
-
-                elif estado is False:
-                    estadisticas[chat_id]["ok"] += 1
-                elif estado == "RATE_LIMIT":
-                    estadisticas[chat_id]["rate_limit"] += 1
-                    await asyncio.sleep(8)
-                else:
-                    estadisticas[chat_id]["error"] += 1
-
-            await asyncio.sleep(1.5)
+--- COMANDO DEL BOT DE TELEGRAM ---
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    uid = user.id
-
-    if uid not in usuarios_autorizados:
-        solicitudes_pendientes[uid] = user.first_name or "Usuario"
-        await update.message.reply_text(
-            "🔒 **Acceso Restringido**\n\n"
-            "No tienes permiso para usar este bot.\n"
-            f"Tu solicitud con ID `{uid}` fue enviada al **Owner** para su aprobación.",
-            parse_mode="Markdown"
-        )
-        if OWNER_ID != 0:
-            try:
-                await context.bot.send_message(
-                    chat_id=OWNER_ID,
-                    text=(
-                        f"📩 **Nueva solicitud de acceso**\n\n"
-                        f"• Nombre: {user.first_name}\n"
-                        f"• Usuario: @{user.username or 'Sin alias'}\n"
-                        f"• ID: `{uid}`\n\n"
-                        f"👉 Para aceptarlo envía: `/aceptar {uid}`"
-                    ),
-                    parse_mode="Markdown"
-                )
-            except Exception:
-                pass
-        return
-
-    texto = (
-        "🎵 **HUNTER 4C / 4L • TIKTOK** 🎵\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "• `/auto4c` — Cazar **4 caracteres** (letras, números, `.`, `_`)\n"
-        "• `/auto4l` — Cazar **4 letras puras** (ej. `kizu`)\n"
-        "• `/parar` — Detener la búsqueda\n"
-        "• `/lista` — Descargar archivo `.txt` con los encontrados\n"
-    )
-    if uid in admins:
-        texto += (
-            "\n🛡️ **Panel de Administración:**\n"
-            "• `/estado` — Ver diagnóstico en vivo\n"
-            "• `/limpiar` — Borrar la lista `.txt` guardada\n"
-            "• `/aceptar ID` — Dar acceso a un usuario\n"
-            "• `/denegar ID` — Quitar acceso a un usuario\n"
-            "• `/addadmin ID` — Hacer administrador a un usuario"
-        )
-    await update.message.reply_text(texto, parse_mode="Markdown")
-
-async def cmd_lista(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in usuarios_autorizados:
-        return
-
-    if not encontrados_lista:
-        await update.message.reply_text("📭 Aún no hay usuarios guardados en la lista.")
-        return
-
-    contenido = "\n".join([f"@{u}" for u in encontrados_lista])
-    archivo = io.BytesIO(contenido.encode("utf-8"))
-    archivo.name = "TikTok_4C_posibles.txt"
-
-    await update.message.reply_document(
-        document=archivo,
-        caption=f"📄 **Lista TikTok:** `{len(encontrados_lista)}` usuarios encontrados.",
-        parse_mode="Markdown"
-    )
-
-async def cmd_limpiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in admins:
-        return
-    encontrados_lista.clear()
-    await update.message.reply_text("🗑️ Lista `.txt` vaciada correctamente.", parse_mode="Markdown")
-
-async def cmd_aceptar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("⛔ Solo el **Owner** puede aceptar usuarios.", parse_mode="Markdown")
-        return
-
-    if not context.args or not context.args.isdigit():
-        await update.message.reply_text("ℹ️ Uso correcto: `/aceptar 123456789`", parse_mode="Markdown")
-        return
-
-    nuevo_id = int(context.args)
-    usuarios_autorizados.add(nuevo_id)
-    solicitudes_pendientes.pop(nuevo_id, None)
-    await update.message.reply_text(f"✅ Usuario `{nuevo_id}` **aceptado**.", parse_mode="Markdown")
-
-    try:
-        await context.bot.send_message(
-            chat_id=nuevo_id,
-            text="🎉 **¡Tu acceso ha sido aprobado por el Owner!**\nEnvía `/start` para ver los comandos.",
-            parse_mode="Markdown"
-        )
-    except Exception:
-        pass
-
-async def cmd_denegar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("⛔ Solo el **Owner** puede revocar accesos.", parse_mode="Markdown")
-        return
-
-    if not context.args or not context.args.isdigit():
-        await update.message.reply_text("ℹ️ Uso correcto: `/denegar 123456789`", parse_mode="Markdown")
-        return
-
-    target_id = int(context.args)
-    if target_id == OWNER_ID:
-        await update.message.reply_text("⚠️ No puedes bloquearte a ti mismo.")
-        return
-
-    usuarios_autorizados.discard(target_id)
-    admins.discard(target_id)
-    busquedas_activas[target_id] = False
-    await update.message.reply_text(f"🚫 Acceso eliminado para `{target_id}`.", parse_mode="Markdown")
-
-async def cmd_addadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("⛔ Solo el **Owner** puede nombrar administradores.", parse_mode="Markdown")
-        return
-
-    if not context.args or not context.args.isdigit():
-        await update.message.reply_text("ℹ️ Uso correcto: `/addadmin 123456789`", parse_mode="Markdown")
-        Usa el código con precaución.
-return
-nuevo_admin = int(context.args)
-usuarios_autorizados.add(nuevo_admin)
-admins.add(nuevo_admin)
-await update.message.reply_text(f"🛡️ Usuario {nuevo_admin} ahora es Administrador.", parse_mode="Markdown")
-async def iniciar_caza(update: Update, context: ContextTypes.DEFAULT_TYPE, modo: str, etiqueta: str):
-uid = update.effective_user.id
-if uid not in usuarios_autorizados:
-await update.message.reply_text("🔒 No estás autorizado. Envía /start para solicitar acceso.", parse_mode="Markdown")
-return
-chat_id = update.effective_chat.id
-if busquedas_activas.get(chat_id, False):
-await update.message.reply_text("⚠️ Ya tienes una caza activa. Usa /parar primero.", parse_mode="Markdown")
-return
-busquedas_activas[chat_id] = True
+if not WEBAPP_URL:
 await update.message.reply_text(
-f"🚀 Caza de {etiqueta} en TikTok iniciada...\n"
-"Recuerda probar los hallazgos en la app de TikTok para confirmar que no estén congelados.",
+"⚠️ Falta configurar la variable WEBAPP_URL en Render con tu enlace .onrender.com.",
 parse_mode="Markdown"
 )
-asyncio.create_task(bucle_automatico(chat_id, context.application, modo))
-async def cmd_auto4c(update: Update, context: ContextTypes.DEFAULT_TYPE):
-await iniciar_caza(update, context, "4c", "4 caracteres (4C)")
-async def cmd_auto4l(update: Update, context: ContextTypes.DEFAULT_TYPE):
-await iniciar_caza(update, context, "4l", "4 letras puras (4L)")
-async def cmd_parar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-if update.effective_user.id not in usuarios_autorizados:
 return
-chat_id = update.effective_chat.id
-busquedas_activas[chat_id] = False
-await update.message.reply_text("🛑 Búsqueda detenida.")
-async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
-if update.effective_user.id not in admins:
-await update.message.reply_text("⛔ Este comando es exclusivo para Administradores.", parse_mode="Markdown")
-return
-chat_id = update.effective_chat.id
-stats = estadisticas.get(chat_id)
-if not stats:
-await update.message.reply_text("ℹ️ No hay ninguna sesión activa. Envía /auto4c o /auto4l.", parse_mode="Markdown")
-return
-texto = (
-f"🛡️ DIAGNÓSTICO ADMIN • TIKTOK\n"
-f"━━━━━━━━━━━━━━━━━━━━\n"
-f"• Intentados: {stats['revisados']}\n"
-f"• Verificados OK: {stats['ok']}\n"
-f"• Posibles Libres: {stats['libres']}\n"
-f"• Guardados en .txt: {len(encontrados_lista)}\n"
-f"• Rate Limits: {stats['rate_limit']}\n"
-f"• Errores/Captcha: {stats['error']}\n"
-f"• Último estado: {ultimo_detalle}"
+teclado = InlineKeyboardMarkup([
+[InlineKeyboardButton("🚀 Abrir Mini App OG Hunter", web_app=WebAppInfo(url=WEBAPP_URL))]
+])
+await update.message.reply_text(
+"⚜️ TG OG USERNAME STUDIO ⚜️\n\n"
+"Toca el botón de abajo para abrir tu Mini App interactiva:",
+reply_markup=teclado,
+parse_mode="Markdown"
 )
-await update.message.reply_text(texto, parse_mode="Markdown")
-async def web_ping(request):
-return web.Response(text="Hunter TikTok activo")
 async def iniciar_todo():
 web_app = web.Application()
-web_app.router.add_get("/", web_ping)
+web_app.router.add_get("/", ruta_webapp)
+web_app.router.add_get("/api/check", ruta_api_check)
+web_app.router.add_get("/api/generar", ruta_api_generar)
 runner = web.AppRunner(web_app)
 await runner.setup()
 port = int(os.environ.get("PORT", 10000))
@@ -314,19 +279,10 @@ site = web.TCPSite(runner, "0.0.0.0", port)
 await site.start()
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 app.add_handler(CommandHandler("start", cmd_start))
-app.add_handler(CommandHandler("lista", cmd_lista))
-app.add_handler(CommandHandler("limpiar", cmd_limpiar))
-app.add_handler(CommandHandler("aceptar", cmd_aceptar))
-app.add_handler(CommandHandler("denegar", cmd_denegar))
-app.add_handler(CommandHandler("addadmin", cmd_addadmin))
-app.add_handler(CommandHandler("auto4c", cmd_auto4c))
-app.add_handler(CommandHandler("auto4l", cmd_auto4l))
-app.add_handler(CommandHandler("parar", cmd_parar))
-app.add_handler(CommandHandler("estado", cmd_estado))
 await app.initialize()
 await app.start()
 await app.updater.start_polling()
-print(f"Bot TikTok activo en puerto {port}...")
+print(f"Mini App y Bot activos en puerto {port}...")
 await asyncio.Event().wait()
 if name == 'main':
-   asyncio.run(iniciar_todo())
+asyncio.run(iniciar_todo())
