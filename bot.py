@@ -204,10 +204,7 @@ async def cmd_limpiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         encontrados_lista.clear()
         await update.message.reply_text("🗑️ Lista vaciada.")
 
-async def cmd_aceptar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID or not context.args or not context.args[0].isdigit():
-        return
-    async def iniciar_todo():
+async def iniciar_todo():
     web_app = web.Application()
     web_app.router.add_get("/", web_ping)
     runner = web.AppRunner(web_app)
