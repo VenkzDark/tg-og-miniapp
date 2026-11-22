@@ -207,28 +207,36 @@ async def cmd_limpiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_aceptar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID or not context.args or not context.args[0].isdigit():
         return
-    nuevo_id = int(context.args[0])
-    usuarios_autorizados.add(nuevo_id)
-    await update.message.reply_text(f"✅ Usuario `{nuevo_id}` aceptado.", parse_mode="Markdown")
+    async def iniciar_todo():
+    web_app = web.Application()
+    web_app.router.add_get("/", web_ping)
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
 
-async def cmd_denegar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID or not context.args or not context.args[0].isdigit():
-        return
-    target_id = int(context.args[0])
-    if target_id != OWNER_ID:
-        usuarios_autorizados.discard(target_id)
-        admins.discard(target_id)
-        busquedas_activas[target_id] = False
-        await update.message.reply_text(f"🚫 Acceso revocado a `{target_id}`.", parse_mode="Markdown")
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("check", cmd_check))
+    app.add_handler(CommandHandler("lista", cmd_lista))
+    app.add_handler(CommandHandler("limpiar", cmd_limpiar))
+    app.add_handler(CommandHandler("aceptar", cmd_aceptar))
+    app.add_handler(CommandHandler("denegar", cmd_denegar))
+    app.add_handler(CommandHandler("addadmin", cmd_addadmin))
+    app.add_handler(CommandHandler("auto5l", cmd_auto5l))
+    app.add_handler(CommandHandler("auto5c", cmd_auto5c))
+    app.add_handler(CommandHandler("autopref", cmd_autopref))
+    app.add_handler(CommandHandler("auto4l", cmd_auto4l))
+    app.add_handler(CommandHandler("parar", cmd_parar))
+    app.add_handler(CommandHandler("estado", cmd_estado))
 
-async def cmd_addadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID or not context.args or not context.args[0].isdigit():
-        cmd_parar))
-app.add_handler(CommandHandler("estado", cmd_estado))
-await app.initialize()
-await app.start()
-await app.updater.start_polling()
-print(f"Bot TG OG activo en puerto {port}...")
-await asyncio.Event().wait()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    print(f"Bot TG OG activo en puerto {port}...")
+    await asyncio.Event().wait()
+
 if __name__ == '__main__':
-asyncio.run(iniciar_todo())
+    asyncio.run(iniciar_todo())
+    
